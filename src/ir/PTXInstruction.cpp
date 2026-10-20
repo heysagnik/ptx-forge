@@ -62,29 +62,6 @@ const char* to_string(StateSpace s) {
     return "global";
 }
 
-const char* to_string(Opcode o) {
-    switch (o) {
-        case Opcode::LD: return "ld";       case Opcode::ST: return "st";
-        case Opcode::MOV: return "mov";     case Opcode::CVT: return "cvt";
-        case Opcode::CVTA: return "cvta";   case Opcode::ADD: return "add";
-        case Opcode::SUB: return "sub";     case Opcode::MUL: return "mul";
-        case Opcode::MAD: return "mad";     case Opcode::FMA: return "fma";
-        case Opcode::DIV: return "div";     case Opcode::REM: return "rem";
-        case Opcode::NEG: return "neg";     case Opcode::ABS: return "abs";
-        case Opcode::MIN: return "min";     case Opcode::MAX: return "max";
-        case Opcode::NOT: return "not";     case Opcode::SHL: return "shl";
-        case Opcode::SHR: return "shr";     case Opcode::AND: return "and";
-        case Opcode::OR: return "or";       case Opcode::XOR: return "xor";
-        case Opcode::SETP: return "setp";   case Opcode::SEL: return "selp";
-        case Opcode::BRA: return "bra";     case Opcode::RET: return "ret";
-        case Opcode::EXIT: return "exit";   case Opcode::BAR_SYNC: return "bar.sync";
-        case Opcode::CP_ASYNC: return "cp.async"; case Opcode::MMA_SYNC: return "mma.sync";
-        case Opcode::ATOM: return "atom";   case Opcode::RED: return "red";
-        case Opcode::CALL: return "call";   case Opcode::OTHER: return "other";
-    }
-    return "other";
-}
-
 namespace {
 const std::unordered_map<std::string, Opcode>& root_table() {
     static const std::unordered_map<std::string, Opcode> t = {
@@ -132,16 +109,14 @@ void classify_mnemonic(PTXInstruction& ins, const std::string& mnemonic) {
     }
 
     ins.space.reset();
-    ins.src_type.reset();
     bool have_type = false;
     ins.type = DataType::B32;
     for (auto& m : ins.modifiers) {
         if (!ins.space) {
             if (auto s = parse_space(m)) { ins.space = s; continue; }
         }
-        if (auto t = parse_type(m)) {
-            if (!have_type) { ins.type = *t; have_type = true; }
-            else if (!ins.src_type) { ins.src_type = *t; }
+        if (!have_type) {
+            if (auto t = parse_type(m)) { ins.type = *t; have_type = true; }
         }
     }
 }

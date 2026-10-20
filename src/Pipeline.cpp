@@ -41,14 +41,11 @@ KernelAnalysis analyze_function(const Function& original, const Module& module, 
     out.ptx_version = module.version;
     out.declared_regs = fn.regs.size();
     for (auto& r : fn.regs) ++out.declared_by_type[to_string(r.type)];
-    out.static_shared_bytes = fn.static_shared_bytes();
 
     ControlFlowGraph cfg = ControlFlowGraph::build(fn);
-    if (opts.dce) {
-        DeadCodeElim dce;
-        dce.run(fn, cfg);
-        out.dce_removed = dce.removed();
-    }
+    DeadCodeElim dce;
+    dce.run(fn, cfg);
+    out.dce_removed = dce.removed();
     out.blocks = cfg.blocks().size();
     out.edges = cfg.edge_count();
     out.loops = cfg.loops().size();
@@ -66,7 +63,6 @@ KernelAnalysis analyze_function(const Function& original, const Module& module, 
 
     AllocOptions ao;
     ao.max_regs = opts.max_regs;
-    ao.rewrite_spills = opts.rewrite_spills;
     RegAllocChaitin alloc(ao);
     bool rewrote = alloc.run(fn, cfg);
     out.alloc = alloc.result();

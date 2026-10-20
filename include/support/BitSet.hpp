@@ -6,7 +6,6 @@
 
 namespace ptxforge {
 
-// Dense, fixed-capacity bit set used for liveness sets and interference rows.
 class BitSet {
 public:
     BitSet() = default;
@@ -18,7 +17,6 @@ public:
     void reset(size_t i) { words_[i >> 6] &= ~(1ull << (i & 63)); }
     void clear() { for (auto& w : words_) w = 0; }
 
-    // this |= o; returns true if any bit changed.
     bool union_with(const BitSet& o) {
         bool changed = false;
         for (size_t i = 0; i < words_.size(); ++i) {
@@ -28,7 +26,6 @@ public:
         }
         return changed;
     }
-    // this &= ~o
     void subtract(const BitSet& o) {
         for (size_t i = 0; i < words_.size(); ++i) words_[i] &= ~o.words_[i];
     }

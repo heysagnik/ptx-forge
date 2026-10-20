@@ -12,12 +12,9 @@
 namespace ptxforge {
 
 struct AnalysisOptions {
-    uint32_t max_regs = 255;  // K for the allocator (--maxrregcount)
-    bool dce = true;
-    bool rewrite_spills = true;
+    uint32_t max_regs = 255;
 };
 
-// Everything the static pipeline learns about one kernel.
 struct KernelAnalysis {
     std::string name;
     std::string target;
@@ -26,36 +23,33 @@ struct KernelAnalysis {
     size_t edges = 0;
     size_t loops = 0;
     size_t dce_removed = 0;
-    size_t instructions = 0;  // after DCE, before spill code
+    size_t instructions = 0;
     size_t declared_regs = 0;
-    std::map<std::string, size_t> declared_by_type;  // "b32" -> 34
+    std::map<std::string, size_t> declared_by_type;
     uint32_t peak_slots = 0;
     uint32_t peak_block = 0;
     uint32_t peak_line = 0;
     uint32_t peak_loop_depth = 0;
     uint32_t max_live_preds = 0;
     passes::AllocResult alloc;
-    std::string cfg_dot;       // CFG after DCE
-    std::string heatmap;       // per-instruction register pressure
+    std::string cfg_dot;
+    std::string heatmap;
     std::string spilled_ptx;   // function text after spill rewriting (empty if nothing spilled)
-    uint64_t static_shared_bytes = 0;
 };
 
-// Runs CFG -> DCE -> liveness -> interference graph -> Chaitin-Briggs on a copy of `fn`.
 KernelAnalysis analyze_function(const ir::Function& fn, const ir::Module& module, const AnalysisOptions& opts);
 
 // A complete PTX module (header, globals, rewritten kernel) from a KernelAnalysis that spilled.
 // Empty if the allocator inserted no spill code.
 std::string emit_spilled_module(const ir::Module& module, const KernelAnalysis& analysis);
 
-// What ptxas / the cubin actually contain for the same kernel.
 struct GroundTruth {
     bool ok = false;
     std::string source;
     std::string error;
     backend::CubinInfo cubin;
     std::optional<backend::KernelInfo> kernel;
-    std::optional<backend::PtxasFunctionStats> ptxas;  // from the JIT / ptxas info log
+    std::optional<backend::PtxasFunctionStats> ptxas;
 };
 
 GroundTruth fetch_ground_truth(backend::CubinProvider& provider, const std::string& ptx_source,

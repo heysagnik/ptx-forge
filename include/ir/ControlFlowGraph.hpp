@@ -11,7 +11,7 @@ namespace ptxforge::ir {
 
 struct NaturalLoop {
     uint32_t header = 0;
-    std::vector<uint32_t> body;  // includes the header
+    std::vector<uint32_t> body;
 };
 
 class ControlFlowGraph {
@@ -26,13 +26,11 @@ public:
     const std::vector<NaturalLoop>& loops() const { return loops_; }
     const std::vector<std::pair<uint32_t, uint32_t>>& back_edges() const { return back_edges_; }
 
-    // Reverse post-order over blocks reachable from the entry (block 0).
     std::vector<uint32_t> reverse_post_order() const;
 
     // Rebuilds fn.instructions / fn.labels from the (possibly rewritten) blocks.
     void linearize(Function& fn) const;
 
-    // Graphviz export; each node lists its instructions, back edges are dashed.
     std::string to_dot(const std::string& graph_name) const;
 
 private:

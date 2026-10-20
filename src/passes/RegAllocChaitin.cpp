@@ -56,9 +56,9 @@ InterferenceGraph InterferenceGraph::build(const Function& fn, const ControlFlow
 namespace {
 
 struct ColorOutcome {
-    std::unordered_map<uint32_t, uint32_t> color;  // reg -> first slot
-    std::vector<uint32_t> spilled;                 // Select failed
-    std::vector<SpillCandidate> potentials;        // pushed as potential spills during Simplify
+    std::unordered_map<uint32_t, uint32_t> color;
+    std::vector<uint32_t> spilled;
+    std::vector<SpillCandidate> potentials;
 };
 
 // `width[r]` is 1, 2 or 4 slots. A node is trivially colorable ("degree < K") when its neighbours
@@ -70,7 +70,6 @@ ColorOutcome color_class(const InterferenceGraph& g, const std::vector<uint32_t>
     std::vector<char> in_class(n, 0), removed(n, 1);
     for (auto v : nodes) { in_class[v] = 1; removed[v] = 0; }
 
-    // Remaining-neighbour counts by neighbour width.
     std::vector<uint32_t> c1(n, 0), c2(n, 0), c4(n, 0);
     auto bump = [&](uint32_t v, uint32_t w, int d) {
         uint32_t& c = w == 1 ? c1[v] : (w == 2 ? c2[v] : c4[v]);
@@ -91,7 +90,7 @@ ColorOutcome color_class(const InterferenceGraph& g, const std::vector<uint32_t>
     auto degree = [&](uint32_t v) { return c1[v] + c2[v] + c4[v]; };
 
     ColorOutcome out;
-    std::vector<std::pair<uint32_t, bool>> stack;  // (reg, potential spill)
+    std::vector<std::pair<uint32_t, bool>> stack;
     std::vector<uint32_t> work;
     std::vector<char> queued(n, 0);
     for (auto v : nodes) if (trivially_colorable(v)) { work.push_back(v); queued[v] = 1; }
@@ -108,7 +107,7 @@ ColorOutcome color_class(const InterferenceGraph& g, const std::vector<uint32_t>
 
     size_t remaining = nodes.size();
     while (remaining > 0) {
-        if (!work.empty()) {  // 1. Simplify
+        if (!work.empty()) {
             uint32_t v = work.back();
             work.pop_back();
             if (removed[v]) continue;
@@ -116,7 +115,6 @@ ColorOutcome color_class(const InterferenceGraph& g, const std::vector<uint32_t>
             --remaining;
             continue;
         }
-        // 2. Potential spill: cheapest cost/degree among the remaining nodes.
         uint32_t best = 0;
         double best_metric = std::numeric_limits<double>::infinity();
         bool found = false;
@@ -131,7 +129,6 @@ ColorOutcome color_class(const InterferenceGraph& g, const std::vector<uint32_t>
         --remaining;
     }
 
-    // 3. Select: pop and assign the lowest aligned run not used by a colored neighbour.
     std::vector<char> occupied(K, 0);
     for (size_t s = stack.size(); s-- > 0;) {
         uint32_t v = stack[s].first;
@@ -171,7 +168,6 @@ bool RegAllocChaitin::run(Function& fn, ControlFlowGraph& cfg) {
             result_.rig_edges = rig.num_edges();
         }
 
-        // Spill cost: sum over defs+uses of 10^loop_depth.
         std::vector<double> cost(fn.regs.size(), 0.0);
         for (auto& b : cfg.blocks()) {
             double w = std::pow(10.0, std::min<uint32_t>(b.loop_depth, 8));

@@ -18,7 +18,6 @@ bool is_special_register(const std::string& name) {
         "%nclusterid", "%cluster_ctaid", "%cluster_nctaid", "%cluster_ctarank",
         "%cluster_nctarank", "%is_explicit_cluster", "%reserved_smem_offset"};
     std::string root = name.substr(0, name.find('.'));
-    // %pm0..%pm7, %envreg0..31 carry a numeric suffix
     for (auto* p : kPrefixes) {
         std::string pre = p;
         if (root.compare(0, pre.size(), pre) == 0 &&
@@ -162,7 +161,7 @@ VarDecl Parser::parse_var_decl(size_t first_tok) {
         count = cur().kind == TokenKind::Integer ? static_cast<uint64_t>(advance().int_value) : 0;
         expect(TokenKind::RBracket, "']'");
     }
-    while (cur().kind != TokenKind::Semi && cur().kind != TokenKind::Eof) advance();  // initializer
+    while (cur().kind != TokenKind::Semi && cur().kind != TokenKind::Eof) advance();
     size_t last = pos_;
     expect(TokenKind::Semi, "';'");
     v.bytes = (type_bits(elem) / 8) * count;
@@ -245,7 +244,7 @@ void Parser::parse_body(Function& fn) {
                     v.space = StateSpace::Reg;
                     fn.vars.push_back(std::move(v));
                 } else {
-                    skip_directive();  // .loc, .file, ...
+                    skip_directive();
                 }
                 continue;
             }
@@ -267,7 +266,7 @@ void Parser::parse_body(Function& fn) {
 }
 
 void Parser::parse_reg_decl(Function& fn) {
-    advance();  // .reg
+    advance();
     DataType type = DataType::B32;
     bool have_type = false;
     while (cur().kind == TokenKind::Directive) {
@@ -336,7 +335,7 @@ void Parser::parse_operand(Function& fn, std::vector<Operand>& out) {
         case TokenKind::Register: {
             Operand first = resolve_register(fn, t);
             advance();
-            if (cur().kind == TokenKind::Pipe) {  // %p|%q dual destination
+            if (cur().kind == TokenKind::Pipe) {
                 advance();
                 const Token& t2 = expect(TokenKind::Register, "register after '|'");
                 Operand second = resolve_register(fn, t2);
@@ -389,7 +388,7 @@ void Parser::parse_operand(Function& fn, std::vector<Operand>& out) {
             out.emplace_back(std::move(v));
             return;
         }
-        case TokenKind::LParen: {  // call argument lists: flattened
+        case TokenKind::LParen: {
             advance();
             if (!accept(TokenKind::RParen)) {
                 do { parse_operand(fn, out); } while (accept(TokenKind::Comma));
@@ -428,7 +427,6 @@ void Parser::parse_instruction(Function& fn) {
     }
     expect(TokenKind::Semi, "';'");
 
-    // Destination detection: first operand is a register (or register vector) and the opcode writes one.
     switch (ins.opcode) {
         case Opcode::ST: case Opcode::BRA: case Opcode::RET: case Opcode::EXIT:
         case Opcode::BAR_SYNC: case Opcode::CP_ASYNC: case Opcode::RED: case Opcode::CALL:
@@ -439,7 +437,6 @@ void Parser::parse_instruction(Function& fn) {
                            (std::holds_alternative<VirtualReg>(ins.operands[0]) ||
                             std::holds_alternative<RegVec>(ins.operands[0]));
     }
-    // Memory operands inherit the instruction's state space.
     size_t mem_idx = 0;
     for (auto& op : ins.operands) {
         if (auto* m = std::get_if<MemoryRef>(&op)) {

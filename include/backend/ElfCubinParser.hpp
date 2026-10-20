@@ -28,34 +28,32 @@ struct ElfSymbol {
     std::string name;
     uint64_t value = 0;
     uint64_t size = 0;
-    uint8_t type = 0;     // STT_*
-    uint8_t binding = 0;  // STB_*
+    uint8_t type = 0;
+    uint8_t binding = 0;
     uint16_t shndx = 0;
 };
 
 // One record of a .nv.info / .nv.info.<kernel> section.
 struct NvInfoAttr {
     uint8_t format = 0;  // 1=NVAL 2=BVAL 3=HVAL 4=SVAL
-    uint8_t attr = 0;    // EIATTR_*
+    uint8_t attr = 0;
     std::vector<uint8_t> payload;
-    std::string name() const;  // EIATTR_REGCOUNT, or EIATTR_0xNN when unknown
-    uint32_t u32(size_t word) const;  // payload word, 0 if out of range
+    std::string name() const;
+    uint32_t u32(size_t word) const;
 };
 
 struct KernelInfo {
     std::string name;
     uint64_t text_bytes = 0;
     uint64_t sass_instructions = 0;
-    bool has_reg_count = false;      // EIATTR_REGCOUNT present (older toolchains)
-    uint32_t reg_count = 0;          // EIATTR_REGCOUNT
-    // Best available physical register count: the attribute if present, else the sh_info byte.
+    bool has_reg_count = false;
+    uint32_t reg_count = 0;
     uint32_t registers() const { return has_reg_count ? reg_count : reg_count_sh_info; }
     uint32_t reg_count_sh_info = 0;  // sh_info >> 24 of .text.<kernel>: where current ptxas stores the count
     uint32_t frame_size = 0;         // EIATTR_FRAME_SIZE (local-memory stack frame)
     uint32_t min_stack_size = 0;     // EIATTR_MIN_STACK_SIZE
     uint64_t shared_bytes = 0;       // .nv.shared.<kernel>
     uint64_t constant_bytes = 0;     // .nv.constant0.<kernel> (params + driver constants)
-    uint64_t local_bytes = 0;        // .nv.local.<kernel>
     std::vector<NvInfoAttr> attrs;
 };
 
@@ -71,7 +69,7 @@ struct CubinInfo {
     std::vector<ElfSection> sections;
     std::vector<ElfSymbol> symbols;
     std::vector<KernelInfo> kernels;
-    std::vector<NvInfoAttr> global_attrs;  // records of the global .nv.info section
+    std::vector<NvInfoAttr> global_attrs;
 
     const KernelInfo* find_kernel(const std::string& name) const;
     const ElfSection* find_section(const std::string& name) const;

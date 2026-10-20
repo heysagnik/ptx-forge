@@ -4,7 +4,6 @@
 
 namespace ptxforge::passes {
 
-// A pass works on one function and its CFG. Returns true if it changed the IR.
 class Pass {
 public:
     virtual ~Pass() = default;

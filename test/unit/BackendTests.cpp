@@ -6,7 +6,10 @@
 #include "Test.hpp"
 #include "TestUtil.hpp"
 #include "backend/CubinProvider.hpp"
+#include "backend/CudaDriver.hpp"
 #include "backend/DriverJITLinker.hpp"
+#include "backend/GpuRunner.hpp"
+#include "backend/PtxasProvider.hpp"
 #include "backend/ElfCubinParser.hpp"
 
 using namespace ptxforge::backend;
@@ -191,8 +194,9 @@ TEST(Providers, FileProviderServesCubinAndReportsMissingFile) {
 
 // These need real hardware / toolkit; they self-skip (pass) when it is not present.
 TEST(Providers, DriverJitCompilesVectorAdd) {
-    DriverJITLinker jit;
-    if (!jit.available()) return;  // no driver / GPU: nothing to verify
+    CudaDriver driver;
+    if (!driver.available()) return;
+    DriverJITLinker jit(driver);
     std::string ptx = testutil::read_file("kernels/vectorAdd.ptx");
     CompileOptions opts;
     auto r = jit.compile(ptx, opts);
@@ -204,8 +208,9 @@ TEST(Providers, DriverJitCompilesVectorAdd) {
 }
 
 TEST(Providers, DriverJitReportsPtxErrors) {
-    DriverJITLinker jit;
-    if (!jit.available()) return;
+    CudaDriver driver;
+    if (!driver.available()) return;
+    DriverJITLinker jit(driver);
     auto r = jit.compile(".version 8.0\n.target sm_80\n.address_size 64\n.entry bad() { bogus; }\n", {});
     EXPECT_FALSE(r.ok);
     EXPECT_FALSE(r.error_log.empty());
@@ -227,8 +232,9 @@ TEST(Providers, PtxasHonoursMaxRegisters) {
 // ---- real execution; skipped when there is no GPU -------------------------------------------
 
 TEST(GpuRun, VectorAddComputesTheSum) {
-    DriverJITLinker gpu;
-    if (!gpu.available()) return;
+    CudaDriver driver;
+    if (!driver.available()) return;
+    GpuRunner gpu(driver);
     std::vector<KernelArg> args(4);
     for (uint32_t i = 0; i < 3; ++i) { args[i].kind = KernelArg::Kind::Buffer; args[i].bytes = 4096; args[i].seed = i; }
     args[3].kind = KernelArg::Kind::U32;
@@ -255,8 +261,9 @@ TEST(GpuRun, VectorAddComputesTheSum) {
 }
 
 TEST(GpuRun, SpilledKernelProducesIdenticalOutput) {
-    DriverJITLinker gpu;
-    if (!gpu.available()) return;
+    CudaDriver driver;
+    if (!driver.available()) return;
+    GpuRunner gpu(driver);
     auto module = parse_ptx(testutil::read_file("kernels/pressure_loop.ptx"));
     ptxforge::AnalysisOptions opts;
     opts.max_regs = 32;
@@ -280,8 +287,9 @@ TEST(GpuRun, SpilledKernelProducesIdenticalOutput) {
 }
 
 TEST(GpuRun, ReportsMissingKernelAndBadPtx) {
-    DriverJITLinker gpu;
-    if (!gpu.available()) return;
+    CudaDriver driver;
+    if (!driver.available()) return;
+    GpuRunner gpu(driver);
     LaunchConfig cfg;
     EXPECT_FALSE(gpu.run(testutil::read_file("kernels/vectorAdd.ptx"), "nope", {}, cfg).ok);
     EXPECT_FALSE(gpu.run(".version 8.0\n.target sm_80\n.address_size 64\n.entry bad() { bogus; }\n", "bad", {}, cfg).ok);

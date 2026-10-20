@@ -23,7 +23,7 @@ struct Token {
     std::string text;
     uint32_t line = 1;
     uint32_t col = 1;
-    size_t offset = 0;   // byte offset into the source
+    size_t offset = 0;
     size_t length = 0;
     int64_t int_value = 0;
     double float_value = 0.0;

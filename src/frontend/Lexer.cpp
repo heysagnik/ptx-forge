@@ -48,14 +48,14 @@ Token Lexer::make(TokenKind k, size_t start, uint32_t line, uint32_t col) const 
 }
 
 Token Lexer::lex_string(size_t start, uint32_t line, uint32_t col) {
-    advance();  // opening quote
+    advance();
     while (pos_ < src_.size() && peek() != '"') {
         if (peek() == '\\' && pos_ + 1 < src_.size()) advance();
         if (peek() == '\n') throw ParseError("unterminated string literal", line, col);
         advance();
     }
     if (pos_ >= src_.size()) throw ParseError("unterminated string literal", line, col);
-    advance();  // closing quote
+    advance();
     return make(TokenKind::String, start, line, col);
 }
 

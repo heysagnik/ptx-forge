@@ -48,7 +48,7 @@ size_t liveness_sweep(Function& fn, ControlFlowGraph& cfg) {
     size_t removed = 0;
     for (auto& b : cfg.blocks()) {
         BitSet cur = b.live_out;
-        std::vector<PTXInstruction> kept;  // collected in reverse
+        std::vector<PTXInstruction> kept;
         kept.reserve(b.insts.size());
         for (size_t i = b.insts.size(); i-- > 0;) {
             const PTXInstruction& ins = b.insts[i];

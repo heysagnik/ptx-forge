@@ -14,7 +14,7 @@ struct BasicBlock {
     std::vector<PTXInstruction> insts;
     std::vector<uint32_t> succs;
     std::vector<uint32_t> preds;
-    uint32_t loop_depth = 0;  // number of natural loops containing this block
+    uint32_t loop_depth = 0;
 
     // Filled by LivenessAnalysis (indexed by VirtualReg::id).
     BitSet ue_var;    // upward-exposed uses

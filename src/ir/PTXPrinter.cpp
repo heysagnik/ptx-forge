@@ -6,7 +6,7 @@ namespace ptxforge::ir {
 
 namespace {
 std::string format_memref(const MemoryRef& m) {
-    if (!m.base_reg && m.symbol.empty()) return "[" + std::to_string(m.offset) + "]";  // absolute address
+    if (!m.base_reg && m.symbol.empty()) return "[" + std::to_string(m.offset) + "]";
     std::string s = "[" + (m.base_reg ? m.base_reg->name : m.symbol);
     if (m.offset > 0) s += "+" + std::to_string(m.offset);
     else if (m.offset < 0) s += std::to_string(m.offset);
@@ -59,7 +59,6 @@ std::string print_function(const Function& fn) {
     if (!fn.header_directives.empty()) os << fn.header_directives << "\n";
     os << "{\n";
 
-    // Register declarations, grouped by type.
     for (int t = 0; t <= static_cast<int>(DataType::Pred); ++t) {
         auto type = static_cast<DataType>(t);
         size_t n = 0;

@@ -96,10 +96,10 @@ static std::vector<NvInfoAttr> parse_nv_info(const std::vector<uint8_t>& img, co
         a.attr = img[pos + 1];
         uint64_t len = 0;
         switch (a.format) {
-            case 1: len = 2; break;                                  // NVAL: no payload
-            case 2: len = 3; a.payload.assign(1, 0); break;          // BVAL: 1 byte
-            case 3: len = 4; a.payload.assign(2, 0); break;          // HVAL: 2 bytes
-            case 4: {                                                // SVAL: u16 size + payload
+            case 1: len = 2; break;
+            case 2: len = 3; a.payload.assign(1, 0); break;
+            case 3: len = 4; a.payload.assign(2, 0); break;
+            case 4: {
                 if (pos + 4 > end) throw ElfError("truncated SVAL record in " + sec.name);
                 uint16_t sz = read<uint16_t>(img, pos + 2);
                 a.payload.assign(sz, 0);
@@ -164,7 +164,6 @@ CubinInfo parse_cubin(const std::vector<uint8_t>& img) {
         info.sections.push_back(r.s);
     }
 
-    // Symbol table (.symtab) with names from its linked string table.
     for (auto& s : info.sections) {
         if (s.name != ".symtab" || s.entsize < 24 || s.link >= info.sections.size()) continue;
         const ElfSection& str = info.sections[s.link];
@@ -182,7 +181,6 @@ CubinInfo parse_cubin(const std::vector<uint8_t>& img) {
         }
     }
 
-    // One KernelInfo per .text.<kernel> section.
     for (auto& s : info.sections) {
         if (!starts_with(s.name, ".text.")) continue;
         KernelInfo k;
@@ -190,14 +188,12 @@ CubinInfo parse_cubin(const std::vector<uint8_t>& img) {
         k.text_bytes = s.size;
         k.sass_instructions = s.size / 16;  // 128-bit SASS encodings (sm_70+)
         k.reg_count_sh_info = s.info >> 24;
-        // Older toolchains keep REGCOUNT / FRAME_SIZE here; the attribute payload is (symbol index, value).
         if (const ElfSection* ni = info.find_section(".nv.info." + k.name)) {
             k.attrs = parse_nv_info(img, *ni);
             for (auto& a : k.attrs) apply_resource_attr(k, a);
         }
         if (auto* sh = info.find_section(".nv.shared." + k.name)) k.shared_bytes = sh->size;
         if (auto* c = info.find_section(".nv.constant0." + k.name)) k.constant_bytes = c->size;
-        if (auto* l = info.find_section(".nv.local." + k.name)) k.local_bytes = l->size;
         info.kernels.push_back(std::move(k));
     }
 

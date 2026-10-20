@@ -27,19 +27,19 @@ ControlFlowGraph ControlFlowGraph::build(const Function& fn) {
 
     for (size_t i = 0; i < n; ++i) {
         if (!labels_at[i].empty()) {
-            if (!cur || !cur->insts.empty()) start_block();  // a label always begins a block
+            if (!cur || !cur->insts.empty()) start_block();
             for (auto& l : labels_at[i]) cur->labels.push_back(l);
         } else if (!cur) {
-            start_block();  // instruction following a terminator
+            start_block();
         }
         cur->insts.push_back(fn.instructions[i]);
         if (fn.instructions[i].is_terminator()) cur = nullptr;
     }
-    if (!labels_at[n].empty()) {  // labels after the last instruction
+    if (!labels_at[n].empty()) {
         if (!cur || !cur->insts.empty()) start_block();
         for (auto& l : labels_at[n]) cur->labels.push_back(l);
     }
-    if (cfg.blocks_.empty()) start_block();  // empty body: single empty block
+    if (cfg.blocks_.empty()) start_block();
 
     cfg.compute_edges();
     cfg.compute_loops();
@@ -85,7 +85,6 @@ size_t ControlFlowGraph::edge_count() const {
 std::vector<uint32_t> ControlFlowGraph::reverse_post_order() const {
     std::vector<uint32_t> post;
     std::vector<char> seen(blocks_.size(), 0);
-    // iterative DFS
     std::vector<std::pair<uint32_t, size_t>> stack;
     if (blocks_.empty()) return post;
     stack.emplace_back(0, 0);
@@ -112,7 +111,6 @@ void ControlFlowGraph::compute_loops() {
     auto rpo = reverse_post_order();
     if (rpo.empty()) return;
 
-    // Iterative dominator sets over reachable blocks.
     std::vector<char> reachable(n, 0);
     for (auto b : rpo) reachable[b] = 1;
     std::vector<BitSet> dom(n, BitSet(n));

@@ -42,7 +42,10 @@ add_library(ptxforge STATIC
   src/passes/RegAllocChaitin.cpp
   src/backend/ElfCubinParser.cpp
   src/backend/CubinProvider.cpp
+  src/backend/CudaDriver.cpp
   src/backend/DriverJITLinker.cpp
+  src/backend/GpuRunner.cpp
+  src/backend/PtxasProvider.cpp
   src/Pipeline.cpp)
 target_include_directories(ptxforge PUBLIC include)
 target_link_libraries(ptxforge PUBLIC ${CMAKE_DL_LIBS})

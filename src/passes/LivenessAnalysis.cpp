@@ -13,7 +13,6 @@ bool LivenessAnalysis::run(Function& fn, ControlFlowGraph& cfg) {
     slots_.assign(nregs, 0);
     for (size_t i = 0; i < nregs; ++i) slots_[i] = reg_slots(fn.regs[i].type);
 
-    // 1. Per-block UEVar / VarKill.
     for (auto& b : blocks) {
         b.ue_var = BitSet(nregs);
         b.var_kill = BitSet(nregs);
@@ -32,7 +31,6 @@ bool LivenessAnalysis::run(Function& fn, ControlFlowGraph& cfg) {
         }
     }
 
-    // 2. Fixed point, visiting blocks in reverse program order (close to post-order for forward CFGs).
     for (bool changed = true; changed;) {
         changed = false;
         for (size_t k = blocks.size(); k-- > 0;) {
@@ -47,7 +45,6 @@ bool LivenessAnalysis::run(Function& fn, ControlFlowGraph& cfg) {
         }
     }
 
-    // 3. Per-instruction live sets and register pressure.
     live_after_.assign(blocks.size(), {});
     pressure_.assign(blocks.size(), {});
     peak_ = {};

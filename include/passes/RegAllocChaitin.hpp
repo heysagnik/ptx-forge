@@ -18,7 +18,6 @@ public:
 
     size_t num_nodes() const { return nodes_.size(); }
     size_t num_edges() const { return edges_; }
-    bool is_node(uint32_t r) const { return present_[r] != 0; }
     bool has_edge(uint32_t a, uint32_t b) const { return rows_[a].test(b); }
     const std::vector<uint32_t>& nodes() const { return nodes_; }
     const std::vector<uint32_t>& neighbors(uint32_t r) const { return adj_[r]; }
@@ -32,9 +31,9 @@ private:
 };
 
 struct AllocOptions {
-    uint32_t max_regs = 255;   // K: --maxrregcount
+    uint32_t max_regs = 255;
     uint32_t max_preds = 7;    // predicate register file size (P0..P6)
-    uint32_t max_rounds = 24;  // allocate / spill-rewrite iterations before giving up
+    uint32_t max_rounds = 24;
     bool rewrite_spills = true;
 };
 
@@ -46,21 +45,21 @@ struct SpillCandidate {
 
 struct AllocResult {
     uint32_t k = 0;
-    uint32_t peak_pressure = 0;            // from the input program (before spill code)
-    bool fits_without_spill = false;       // first Simplify/Select pass colored everything
-    bool converged = false;                // final program is colorable with K registers
+    uint32_t peak_pressure = 0;
+    bool fits_without_spill = false;
+    bool converged = false;
     uint32_t rounds = 0;
-    uint32_t regs_used = 0;                // physical 32-bit registers after allocation
+    uint32_t regs_used = 0;
     uint32_t preds_used = 0;
-    bool pred_overflow = false;            // more live predicates than hardware predicate registers
-    size_t rig_nodes = 0;                  // first round
+    bool pred_overflow = false;
+    size_t rig_nodes = 0;
     size_t rig_edges = 0;
-    std::vector<SpillCandidate> potential_spills;  // pushed optimistically in round 1
-    std::vector<SpillCandidate> actual_spills;     // failed Select, all rounds
+    std::vector<SpillCandidate> potential_spills;
+    std::vector<SpillCandidate> actual_spills;
     uint32_t spill_stores = 0;
     uint32_t spill_loads = 0;
     uint32_t frame_bytes = 0;
-    std::unordered_map<uint32_t, uint32_t> assignment;  // vreg id -> first physical register
+    std::unordered_map<uint32_t, uint32_t> assignment;
 };
 
 // Chaitin-Briggs optimistic graph coloring with width-aware (1/2/4 slot, aligned) nodes.
