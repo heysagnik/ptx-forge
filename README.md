@@ -101,3 +101,7 @@ when the cap binds. Spill sizes differ more.
 Not handled: spilling predicate or 128-bit registers, indirect branches (`brx.idx`), `call` results written
 to registers, and nested `{}` register scopes (flattened, so same-name redeclarations share a register).
 `.loc`, `.file` and debug sections are dropped when PTX is re-emitted.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
