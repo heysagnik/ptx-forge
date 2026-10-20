@@ -1,0 +1,59 @@
+//
+// Tensor-core tile: cp.async staging, vector shared loads, mma.sync (m16n8k16, f16 -> f32),
+// warp shuffle with a dual (value|predicate) destination, selp, atomics.
+//
+
+.version 8.0
+.target sm_80
+.address_size 64
+
+.visible .entry mma_tile(
+	.param .u64 mma_tile_param_0,
+	.param .u64 mma_tile_param_1,
+	.param .u64 mma_tile_param_2
+)
+{
+	.reg .pred 	%p<4>;
+	.reg .b32 	%r<24>;
+	.reg .f32 	%f<12>;
+	.reg .b64 	%rd<12>;
+
+	.shared .align 16 .b8 mma_tile_smem[512];
+
+	ld.param.u64 	%rd1, [mma_tile_param_0];
+	ld.param.u64 	%rd2, [mma_tile_param_1];
+	ld.param.u64 	%rd3, [mma_tile_param_2];
+	cvta.to.global.u64 	%rd4, %rd1;
+	cvta.to.global.u64 	%rd5, %rd2;
+	cvta.to.global.u64 	%rd6, %rd3;
+	mov.u32 	%r1, %tid.x;
+	mul.wide.u32 	%rd7, %r1, 16;
+	add.s64 	%rd8, %rd4, %rd7;
+	mov.u32 	%r2, mma_tile_smem;
+	shl.b32 	%r3, %r1, 4;
+	add.s32 	%r4, %r2, %r3;
+	cp.async.ca.shared.global 	[%r4], [%rd8], 16;
+	cp.async.commit_group;
+	cp.async.wait_group 	0;
+	bar.sync 	0;
+	ld.shared.v4.b32 	{%r5, %r6, %r7, %r8}, [%r4];
+	mov.f32 	%f1, 0f00000000;
+	mov.f32 	%f2, 0f00000000;
+	mov.f32 	%f3, 0f00000000;
+	mov.f32 	%f4, 0f00000000;
+	mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 	{%f1, %f2, %f3, %f4}, {%r5, %r6, %r7, %r8}, {%r5, %r6}, {%f1, %f2, %f3, %f4};
+	add.f32 	%f5, %f1, %f2;
+	add.f32 	%f6, %f3, %f4;
+	add.f32 	%f7, %f5, %f6;
+	shfl.sync.bfly.b32 	%r9|%p1, %r5, 1, 31, -1;
+	setp.gt.f32 	%p2, %f7, 0f00000000;
+	selp.f32 	%f8, %f7, 0f00000000, %p2;
+	cvt.rn.f32.u32 	%f9, %r9;
+	@%p1 add.f32 	%f8, %f8, %f9;
+	add.s64 	%rd9, %rd6, %rd7;
+	st.global.f32 	[%rd9], %f8;
+	atom.global.add.f32 	%f10, [%rd5], %f8;
+	red.global.add.f32 	[%rd5+4], %f7;
+	ret;
+
+}

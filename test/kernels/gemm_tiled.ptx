@@ -1,0 +1,108 @@
+//
+// 16x16 shared-memory tiled SGEMM:  C[MxN] = A[MxK] * B[KxN]
+// Hand-written in the style of `nvcc -ptx` output: two nested natural loops,
+// bar.sync, shared-memory tiles and a predicated epilogue.
+//
+
+.version 8.0
+.target sm_80
+.address_size 64
+
+.visible .entry gemm_tiled(
+	.param .u64 gemm_tiled_param_0,
+	.param .u64 gemm_tiled_param_1,
+	.param .u64 gemm_tiled_param_2,
+	.param .u32 gemm_tiled_param_3,
+	.param .u32 gemm_tiled_param_4,
+	.param .u32 gemm_tiled_param_5
+)
+{
+	.reg .pred 	%p<8>;
+	.reg .b32 	%r<40>;
+	.reg .f32 	%f<8>;
+	.reg .b64 	%rd<24>;
+
+	.shared .align 4 .b8 gemm_tiled_As[1024];
+	.shared .align 4 .b8 gemm_tiled_Bs[1024];
+
+	ld.param.u64 	%rd1, [gemm_tiled_param_0];
+	ld.param.u64 	%rd2, [gemm_tiled_param_1];
+	ld.param.u64 	%rd3, [gemm_tiled_param_2];
+	ld.param.u32 	%r1, [gemm_tiled_param_3];
+	ld.param.u32 	%r2, [gemm_tiled_param_4];
+	ld.param.u32 	%r3, [gemm_tiled_param_5];
+	cvta.to.global.u64 	%rd4, %rd1;
+	cvta.to.global.u64 	%rd5, %rd2;
+	cvta.to.global.u64 	%rd6, %rd3;
+	mov.u32 	%r4, %tid.x;
+	mov.u32 	%r5, %tid.y;
+	mov.u32 	%r6, %ctaid.x;
+	mov.u32 	%r7, %ctaid.y;
+	shl.b32 	%r8, %r7, 4;
+	add.s32 	%r9, %r8, %r5;
+	shl.b32 	%r10, %r6, 4;
+	add.s32 	%r11, %r10, %r4;
+	mov.f32 	%f1, 0f00000000;
+	mov.u32 	%r12, 0;
+	mov.u32 	%r13, gemm_tiled_As;
+	mov.u32 	%r14, gemm_tiled_Bs;
+	shl.b32 	%r15, %r5, 4;
+	add.s32 	%r16, %r15, %r4;
+	shl.b32 	%r17, %r16, 2;
+	add.s32 	%r18, %r13, %r17;
+	add.s32 	%r19, %r14, %r17;
+	shl.b32 	%r20, %r5, 6;
+	add.s32 	%r21, %r13, %r20;
+	shl.b32 	%r22, %r4, 2;
+	add.s32 	%r23, %r14, %r22;
+	setp.ge.s32 	%p1, %r12, %r3;
+	@%p1 bra 	$L__BB0_5;
+
+$L__BB0_1:
+	add.s32 	%r24, %r12, %r4;
+	mad.lo.s32 	%r25, %r9, %r3, %r24;
+	mul.wide.s32 	%rd7, %r25, 4;
+	add.s64 	%rd8, %rd4, %rd7;
+	ld.global.f32 	%f2, [%rd8];
+	st.shared.f32 	[%r18], %f2;
+	add.s32 	%r26, %r12, %r5;
+	mad.lo.s32 	%r27, %r26, %r2, %r11;
+	mul.wide.s32 	%rd9, %r27, 4;
+	add.s64 	%rd10, %rd5, %rd9;
+	ld.global.f32 	%f3, [%rd10];
+	st.shared.f32 	[%r19], %f3;
+	bar.sync 	0;
+	mov.u32 	%r28, 0;
+	mov.u32 	%r29, %r21;
+	mov.u32 	%r30, %r23;
+
+$L__BB0_2:
+	ld.shared.f32 	%f4, [%r29];
+	ld.shared.f32 	%f5, [%r30];
+	fma.rn.f32 	%f1, %f4, %f5, %f1;
+	add.s32 	%r29, %r29, 4;
+	add.s32 	%r30, %r30, 64;
+	add.s32 	%r28, %r28, 1;
+	setp.lt.s32 	%p2, %r28, 16;
+	@%p2 bra 	$L__BB0_2;
+
+	bar.sync 	0;
+	add.s32 	%r12, %r12, 16;
+	setp.lt.s32 	%p3, %r12, %r3;
+	@%p3 bra 	$L__BB0_1;
+
+$L__BB0_5:
+	setp.ge.s32 	%p4, %r9, %r1;
+	setp.ge.s32 	%p5, %r11, %r2;
+	or.pred  	%p6, %p4, %p5;
+	@%p6 bra 	$L__BB0_7;
+
+	mad.lo.s32 	%r31, %r9, %r2, %r11;
+	mul.wide.s32 	%rd11, %r31, 4;
+	add.s64 	%rd12, %rd6, %rd11;
+	st.global.f32 	[%rd12], %f1;
+
+$L__BB0_7:
+	ret;
+
+}

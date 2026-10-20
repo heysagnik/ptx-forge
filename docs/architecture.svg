@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="910" height="490" viewBox="0 0 910 490" role="img" aria-labelledby="ttl desc" font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <title id="ttl">ptx-forge architecture</title>
+  <desc id="desc">PTX passes through the front end, CFG, dataflow passes and register allocator. The cubin from the CUDA driver JIT, ptxas or a file is parsed and compared with the allocator's prediction.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 1L9 5L0 9z" style="fill:var(--line)"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 1L9 5L0 9z" style="fill:var(--accent)"/>
+    </marker>
+    <style>
+      :root{--bg:#ffffff;--ink:#1f2328;--sub:#656d76;--line:#8c959f;--rule:#d0d7de;--accent:#0b6e8a}
+      @media (prefers-color-scheme: dark){
+        :root{--bg:#0d1117;--ink:#e6edf3;--sub:#8d96a0;--line:#6e7681;--rule:#30363d;--accent:#56c4e0}
+      }
+      text{fill:var(--ink)}
+      .name{font-size:13.5px;font-weight:600}
+      .d{font-size:11.5px;fill:var(--sub)}
+      .m{font-family:ui-monospace,Cascadia Code,Consolas,Menlo,monospace;font-size:12px}
+      .p{font-family:ui-monospace,Cascadia Code,Consolas,Menlo,monospace;font-size:11px;fill:var(--sub)}
+      .cap{font-size:10.5px;font-weight:600;letter-spacing:.08em;fill:var(--sub)}
+      .box{fill:none;stroke:var(--rule);stroke-width:1}
+      .hi{fill:none;stroke:var(--accent);stroke-width:1.4}
+      .ln{fill:none;stroke:var(--line);stroke-width:1.2;marker-end:url(#a)}
+      .lead{fill:none;stroke:var(--line);stroke-width:1;stroke-dasharray:2 3}
+      .acc{fill:none;stroke:var(--accent);stroke-width:1.4;marker-end:url(#b)}
+    </style>
+  </defs>
+  <rect width="910" height="490" fill="var(--bg)"/>
+
+  <text x="32" y="40" font-size="18" font-weight="650">ptx-forge</text>
+  <text x="32" y="59" class="d">PTX in, register-allocation prediction out, checked against what ptxas actually produced.</text>
+
+  <!-- input -->
+  <text x="32" y="98" class="m">kernel.ptx</text>
+  <path class="ln" d="M127 104V122"/>
+
+  <!-- stage columns -->
+  <g>
+    <rect class="box" x="32" y="122" width="190" height="162" rx="4"/>
+    <text x="46" y="148" class="name">Front-end</text><text x="46" y="165" class="d">recursive-descent parser</text>
+    <path d="M46 176H208" stroke="var(--rule)"/>
+    <text x="46" y="198" class="m">Lexer</text><text x="46" y="220" class="m">Parser</text><text x="46" y="242" class="m">ir::Module</text>
+    <text x="46" y="269" class="p">frontend/</text>
+
+    <rect class="box" x="250" y="122" width="190" height="162" rx="4"/>
+    <text x="264" y="148" class="name">Control flow</text><text x="264" y="165" class="d">blocks, edges, loops</text>
+    <path d="M264 176H426" stroke="var(--rule)"/>
+    <text x="264" y="198" class="m">BasicBlock</text><text x="264" y="220" class="m">ControlFlowGraph</text><text x="264" y="242" class="m">natural loops</text>
+    <text x="264" y="269" class="p">ir/</text>
+
+    <rect class="box" x="468" y="122" width="190" height="162" rx="4"/>
+    <text x="482" y="148" class="name">Dataflow</text><text x="482" y="165" class="d">bitset liveness, DCE</text>
+    <path d="M482 176H644" stroke="var(--rule)"/>
+    <text x="482" y="198" class="m">DeadCodeElim</text><text x="482" y="220" class="m">LivenessAnalysis</text><text x="482" y="242" class="m">InterferenceGraph</text>
+    <text x="482" y="269" class="p">passes/</text>
+
+    <rect class="box" x="686" y="122" width="190" height="162" rx="4"/>
+    <text x="700" y="148" class="name">Allocator</text><text x="700" y="165" class="d">Chaitin-Briggs, K colours</text>
+    <path d="M700 176H862" stroke="var(--rule)"/>
+    <text x="700" y="198" class="m">simplify / select</text><text x="700" y="220" class="m">potential spill</text><text x="700" y="242" class="m">rewrite_spills</text>
+    <text x="700" y="269" class="p">passes/</text>
+  </g>
+  <path class="ln" d="M222 203H250"/><path class="ln" d="M440 203H468"/><path class="ln" d="M658 203H686"/>
+
+  <!-- outputs -->
+  <path class="lead" d="M345 284V316"/><text x="345" y="332" text-anchor="middle" class="m">cfg.dot</text>
+  <path class="lead" d="M563 284V316"/><text x="563" y="332" text-anchor="middle" class="m">--heatmap</text>
+  <path class="lead" d="M740 284V316"/><text x="740" y="332" text-anchor="middle" class="m">spilled.ptx</text>
+
+  <!-- ground truth lane -->
+  <path d="M32 366H878" stroke="var(--rule)"/>
+  <text x="32" y="386" class="cap">GROUND TRUTH</text>
+
+  <rect class="box" x="32" y="398" width="190" height="76" rx="4"/>
+  <text x="46" y="420" class="m" font-weight="600">CubinProvider</text>
+  <text x="46" y="440" class="d">DriverJITLinker  (cuLink*)</text>
+  <text x="46" y="455" class="d">PtxasProvider</text>
+  <text x="46" y="470" class="d">FileCubinProvider</text>
+
+  <rect class="box" x="250" y="398" width="190" height="76" rx="4"/>
+  <text x="264" y="420" class="m" font-weight="600">ElfCubinParser</text>
+  <text x="264" y="440" class="d">sh_info, .nv.info records</text>
+  <text x="264" y="455" class="d">REGCOUNT, FRAME_SIZE</text>
+  <text x="264" y="470" class="d">sections, symbols</text>
+  <path class="ln" d="M222 436H250"/>
+
+  <rect class="hi" x="686" y="398" width="190" height="76" rx="4"/>
+  <text x="700" y="420" class="name">Report</text>
+  <text x="700" y="440" class="d">predicted vs actual registers,</text>
+  <text x="700" y="455" class="d">spill frame, shared memory</text>
+  <path class="acc" d="M440 436H686"/>
+  <text x="563" y="428" text-anchor="middle" class="d">cubin facts</text>
+
+  <!-- prediction from allocator down to the report -->
+  <path class="acc" d="M812 284V398"/>
+  <text x="804" y="352" text-anchor="end" class="m" style="fill:var(--accent)">prediction</text>
+</svg>

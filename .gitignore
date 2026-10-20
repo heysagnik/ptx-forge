@@ -1,0 +1,8 @@
+build/
+cmake-build-*/
+*.o
+*.obj
+*.exe
+.vs/
+.vscode/
+compile_commands.json
