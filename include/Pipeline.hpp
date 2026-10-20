@@ -44,6 +44,10 @@ struct KernelAnalysis {
 // Runs CFG -> DCE -> liveness -> interference graph -> Chaitin-Briggs on a copy of `fn`.
 KernelAnalysis analyze_function(const ir::Function& fn, const ir::Module& module, const AnalysisOptions& opts);
 
+// A complete PTX module (header, globals, rewritten kernel) from a KernelAnalysis that spilled.
+// Empty if the allocator inserted no spill code.
+std::string emit_spilled_module(const ir::Module& module, const KernelAnalysis& analysis);
+
 // What ptxas / the cubin actually contain for the same kernel.
 struct GroundTruth {
     bool ok = false;

@@ -23,6 +23,7 @@ Tests use GoogleTest when available and a small built-in shim otherwise.
 ptx-forge analyze kernel.ptx --maxrregcount=32 --export-cfg=cfg.dot --heatmap --emit-spilled=spilled.ptx
 ptx-forge analyze kernel.ptx --ground-truth=ptxas     # auto (default) | jit | ptxas | none
 ptx-forge analyze kernel.ptx --cubin=prebuilt.cubin
+ptx-forge verify kernel.ptx --maxrregcount=32 --grid=1 --block=64 --arg=buf:4096 --arg=buf:4096 --arg=u32:3
 ptx-forge inspect kernel.cubin
 ```
 
@@ -40,6 +41,30 @@ Output for `test/kernels/pressure_loop.ptx` (48 loop-carried accumulators) on an
   Prediction vs ptxas        : 32 predicted, 32 actual (+0)
   ptxas Actual Spill Frame   : 160 bytes stack frame (predicted 96)
 ```
+
+## Running on the GPU
+
+`verify` launches the kernel through the driver on identical inputs in up to four variants: the original PTX,
+the original capped by the driver at K registers, and ptx-forge's spill-rewritten PTX with and without the
+cap. It compares every output buffer bit for bit and reads the register and local-memory use the driver
+actually chose. One `--arg` per kernel parameter, in order (`buf:BYTES`, `u32:N`, `u64:N`, `f32:X`).
+
+```
+$ ptx-forge verify test/kernels/pressure_loop.ptx --maxrregcount=32 --block=64       --arg=buf:4096 --arg=buf:4096 --arg=u32:3
+Kernel        : pressure_loop   grid=1 block=64
+Prediction    : peak 54 live registers, K=32 -> spills (96 B .local predicted)
+
+  variant                             regs   local B  output vs baseline
+  original, driver default              54         0  reference
+  original, driver cap 32               32       160  identical
+  ptx-forge spill code, no cap          45        96  identical
+  ptx-forge spill code, cap 32          32       152  identical
+```
+
+Here the predicted peak of 54 matches the 54 registers the driver allocates when uncapped. Caps below the
+architecture minimum are raised by the driver (`gemm_tiled` at cap 16 runs with 24), and an instruction can
+need more than the cap allows (`mma_tile` needs 28 for its `mma`, so capped variants fail with the
+driver's error). The unit tests include GPU runs that skip themselves when no device is present.
 
 ## Design notes
 

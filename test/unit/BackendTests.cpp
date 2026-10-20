@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iterator>
 
+#include "Pipeline.hpp"
 #include "Test.hpp"
 #include "TestUtil.hpp"
 #include "backend/CubinProvider.hpp"
@@ -9,6 +10,7 @@
 #include "backend/ElfCubinParser.hpp"
 
 using namespace ptxforge::backend;
+using ptxforge::frontend::parse_ptx;
 
 namespace {
 std::vector<uint8_t> load_bytes(const std::string& rel) {
@@ -220,4 +222,67 @@ TEST(Providers, PtxasHonoursMaxRegisters) {
     CubinInfo c = parse_cubin(r.cubin);
     EXPECT_EQ(c.kernels[0].registers(), 32u);
     EXPECT_GT(c.kernels[0].frame_size, 0u);
+}
+
+// ---- real execution; skipped when there is no GPU -------------------------------------------
+
+TEST(GpuRun, VectorAddComputesTheSum) {
+    DriverJITLinker gpu;
+    if (!gpu.available()) return;
+    std::vector<KernelArg> args(4);
+    for (uint32_t i = 0; i < 3; ++i) { args[i].kind = KernelArg::Kind::Buffer; args[i].bytes = 4096; args[i].seed = i; }
+    args[3].kind = KernelArg::Kind::U32;
+    args[3].value = 1000;
+    LaunchConfig cfg;
+    cfg.grid[0] = 4;
+    cfg.block[0] = 256;
+    auto r = gpu.run(testutil::read_file("kernels/vectorAdd.ptx"), "_Z9vectorAddPKfS0_Pfi", args, cfg);
+    ASSERT_TRUE(r.ok);
+    ASSERT_EQ(r.buffers.size(), 3u);
+    auto a = fill_pattern(0, 4096), b = fill_pattern(1, 4096), untouched = fill_pattern(2, 4096);
+    for (size_t i = 0; i < 1024; ++i) {
+        float fa, fb, fc;
+        std::memcpy(&fa, a.data() + i * 4, 4);
+        std::memcpy(&fb, b.data() + i * 4, 4);
+        std::memcpy(&fc, r.buffers[2].data() + i * 4, 4);
+        if (i < 1000) {
+            EXPECT_EQ(fc, fa + fb);
+        } else {
+            EXPECT_TRUE(std::memcmp(r.buffers[2].data() + i * 4, untouched.data() + i * 4, 4) == 0);  // bounds check held
+        }
+    }
+    EXPECT_GT(r.registers, 0);
+}
+
+TEST(GpuRun, SpilledKernelProducesIdenticalOutput) {
+    DriverJITLinker gpu;
+    if (!gpu.available()) return;
+    auto module = parse_ptx(testutil::read_file("kernels/pressure_loop.ptx"));
+    ptxforge::AnalysisOptions opts;
+    opts.max_regs = 32;
+    auto analysis = ptxforge::analyze_function(module.functions[0], module, opts);
+    std::string spilled = ptxforge::emit_spilled_module(module, analysis);
+    ASSERT_TRUE(!spilled.empty());
+
+    std::vector<KernelArg> args(3);
+    for (uint32_t i = 0; i < 2; ++i) { args[i].kind = KernelArg::Kind::Buffer; args[i].bytes = 4096; args[i].seed = i; }
+    args[2].kind = KernelArg::Kind::U32;
+    args[2].value = 3;
+    LaunchConfig cfg;
+    cfg.block[0] = 64;
+    auto original = gpu.run(testutil::read_file("kernels/pressure_loop.ptx"), "pressure_loop", args, cfg);
+    auto rewritten = gpu.run(spilled, "pressure_loop", args, cfg, 32);
+    ASSERT_TRUE(original.ok);
+    ASSERT_TRUE(rewritten.ok);
+    EXPECT_EQ(rewritten.registers, 32);
+    EXPECT_GT(rewritten.local_bytes, 0);
+    EXPECT_TRUE(original.buffers == rewritten.buffers);
+}
+
+TEST(GpuRun, ReportsMissingKernelAndBadPtx) {
+    DriverJITLinker gpu;
+    if (!gpu.available()) return;
+    LaunchConfig cfg;
+    EXPECT_FALSE(gpu.run(testutil::read_file("kernels/vectorAdd.ptx"), "nope", {}, cfg).ok);
+    EXPECT_FALSE(gpu.run(".version 8.0\n.target sm_80\n.address_size 64\n.entry bad() { bogus; }\n", "bad", {}, cfg).ok);
 }

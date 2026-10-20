@@ -22,6 +22,9 @@ using CUresult = int;
 using CUdevice = int;
 using CUcontext = void*;
 using CUlinkState = void*;
+using CUmodule = void*;
+using CUfunction = void*;
+using CUdeviceptr = unsigned long long;
 using CUjit_option = int;
 constexpr CUjit_option kJitMaxRegisters = 0;
 constexpr CUjit_option kJitInfoLogBuffer = 3;
@@ -31,6 +34,10 @@ constexpr CUjit_option kJitErrorLogBufferSize = 6;
 constexpr CUjit_option kJitTarget = 9;
 constexpr CUjit_option kJitLogVerbose = 12;
 constexpr int kJitInputPtx = 1;
+constexpr int kFuncMaxThreads = 0;
+constexpr int kFuncSharedBytes = 1;
+constexpr int kFuncLocalBytes = 3;
+constexpr int kFuncNumRegs = 4;
 constexpr int kAttrCcMajor = 75;
 constexpr int kAttrCcMinor = 76;
 
@@ -68,6 +75,17 @@ struct DriverJITLinker::Impl {
     CUresult (*cuLinkComplete)(CUlinkState, void**, size_t*) = nullptr;
     CUresult (*cuLinkDestroy)(CUlinkState) = nullptr;
     CUresult (*cuGetErrorString)(CUresult, const char**) = nullptr;
+    CUresult (*cuModuleLoadDataEx)(CUmodule*, const void*, unsigned, CUjit_option*, void**) = nullptr;
+    CUresult (*cuModuleUnload)(CUmodule) = nullptr;
+    CUresult (*cuModuleGetFunction)(CUfunction*, CUmodule, const char*) = nullptr;
+    CUresult (*cuFuncGetAttribute)(int*, int, CUfunction) = nullptr;
+    CUresult (*cuMemAlloc)(CUdeviceptr*, size_t) = nullptr;
+    CUresult (*cuMemFree)(CUdeviceptr) = nullptr;
+    CUresult (*cuMemcpyHtoD)(CUdeviceptr, const void*, size_t) = nullptr;
+    CUresult (*cuMemcpyDtoH)(void*, CUdeviceptr, size_t) = nullptr;
+    CUresult (*cuLaunchKernel)(CUfunction, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned,
+                               void*, void**, void**) = nullptr;
+    CUresult (*cuCtxSynchronize)() = nullptr;
 
     std::string err(CUresult r) const {
         const char* s = nullptr;
@@ -90,7 +108,12 @@ DriverJITLinker::DriverJITLinker() : impl_(std::make_unique<Impl>()) {
               load(d.cuDevicePrimaryCtxRelease, "cuDevicePrimaryCtxRelease_v2") &&
               load(d.cuCtxSetCurrent, "cuCtxSetCurrent") && load(d.cuLinkCreate, "cuLinkCreate_v2") &&
               load(d.cuLinkAddData, "cuLinkAddData_v2") && load(d.cuLinkComplete, "cuLinkComplete") &&
-              load(d.cuLinkDestroy, "cuLinkDestroy") && load(d.cuGetErrorString, "cuGetErrorString");
+              load(d.cuLinkDestroy, "cuLinkDestroy") && load(d.cuGetErrorString, "cuGetErrorString") &&
+              load(d.cuModuleLoadDataEx, "cuModuleLoadDataEx") && load(d.cuModuleUnload, "cuModuleUnload") &&
+              load(d.cuModuleGetFunction, "cuModuleGetFunction") && load(d.cuFuncGetAttribute, "cuFuncGetAttribute") &&
+              load(d.cuMemAlloc, "cuMemAlloc_v2") && load(d.cuMemFree, "cuMemFree_v2") &&
+              load(d.cuMemcpyHtoD, "cuMemcpyHtoD_v2") && load(d.cuMemcpyDtoH, "cuMemcpyDtoH_v2") &&
+              load(d.cuLaunchKernel, "cuLaunchKernel") && load(d.cuCtxSynchronize, "cuCtxSynchronize");
     if (!ok) { d.reason = "CUDA driver library is missing required cuLink* entry points"; return; }
     if (CUresult r = d.cuInit(0)) { d.reason = "cuInit failed: " + d.err(r); return; }
     if (CUresult r = d.cuDeviceGet(&d.dev, 0)) { d.reason = "no CUDA device: " + d.err(r); return; }
@@ -158,6 +181,85 @@ CompileResult DriverJITLinker::compile(std::string_view ptx, const CompileOption
     res.info_log = info.data();
     res.error_log = error.data();
     res.ptxas_stats = parse_ptxas_log(res.info_log);
+    res.ok = true;
+    return res;
+}
+
+std::vector<uint8_t> fill_pattern(uint32_t seed, size_t bytes) {
+    std::vector<uint8_t> out(bytes, 0);
+    uint32_t x = 0x9E3779B9u ^ (seed * 2654435761u);
+    for (size_t i = 0; i + 4 <= bytes; i += 4) {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;  // xorshift32
+        float f = static_cast<float>(x >> 8) / 8388608.0f - 1.0f;  // [-1, 1)
+        std::memcpy(out.data() + i, &f, 4);
+    }
+    return out;
+}
+
+RunResult DriverJITLinker::run(std::string_view ptx, const std::string& kernel, const std::vector<KernelArg>& args,
+                               const LaunchConfig& cfg, uint32_t max_regs) {
+    RunResult res;
+    Impl& d = *impl_;
+    if (!available()) { res.error = d.reason; return res; }
+    d.cuCtxSetCurrent(d.ctx);
+
+    std::vector<char> error(16384, 0);
+    std::vector<CUjit_option> o = {kJitErrorLogBuffer, kJitErrorLogBufferSize};
+    std::vector<void*> v = {error.data(), reinterpret_cast<void*>(static_cast<uintptr_t>(error.size()))};
+    if (max_regs) {
+        o.push_back(kJitMaxRegisters);
+        v.push_back(reinterpret_cast<void*>(static_cast<uintptr_t>(max_regs)));
+    }
+
+    std::string text(ptx);
+    CUmodule mod = nullptr;
+    std::vector<CUdeviceptr> dev(args.size(), 0);
+    auto cleanup = [&] {
+        for (auto p : dev) if (p) d.cuMemFree(p);
+        if (mod) d.cuModuleUnload(mod);
+    };
+    auto fail = [&](const std::string& what, CUresult r) {
+        res.error = what + ": " + d.err(r) + (error[0] ? std::string("\n") + error.data() : "");
+        cleanup();
+        return res;
+    };
+
+    CUresult r = d.cuModuleLoadDataEx(&mod, text.c_str(), static_cast<unsigned>(o.size()), o.data(), v.data());
+    if (r) { mod = nullptr; return fail("cuModuleLoadDataEx", r); }
+    CUfunction fn = nullptr;
+    if ((r = d.cuModuleGetFunction(&fn, mod, kernel.c_str()))) return fail("cuModuleGetFunction(" + kernel + ")", r);
+    d.cuFuncGetAttribute(&res.registers, kFuncNumRegs, fn);
+    d.cuFuncGetAttribute(&res.local_bytes, kFuncLocalBytes, fn);
+    d.cuFuncGetAttribute(&res.shared_bytes, kFuncSharedBytes, fn);
+    d.cuFuncGetAttribute(&res.max_threads, kFuncMaxThreads, fn);
+
+    // Marshal arguments. Scalars live in `scalars`, buffers' device pointers in `dev`.
+    std::vector<uint64_t> scalars(args.size(), 0);
+    std::vector<void*> params(args.size());
+    for (size_t i = 0; i < args.size(); ++i) {
+        const KernelArg& a = args[i];
+        if (a.kind == KernelArg::Kind::Buffer) {
+            if ((r = d.cuMemAlloc(&dev[i], a.bytes))) { dev[i] = 0; return fail("cuMemAlloc", r); }
+            auto init = fill_pattern(a.seed, a.bytes);
+            if ((r = d.cuMemcpyHtoD(dev[i], init.data(), a.bytes))) return fail("cuMemcpyHtoD", r);
+            scalars[i] = dev[i];
+        } else {
+            scalars[i] = a.value;  // little-endian: the low bytes are what a u32/f32 param reads
+        }
+        params[i] = &scalars[i];
+    }
+
+    r = d.cuLaunchKernel(fn, cfg.grid[0], cfg.grid[1], cfg.grid[2], cfg.block[0], cfg.block[1], cfg.block[2],
+                         cfg.dynamic_shared, nullptr, params.data(), nullptr);
+    if (r) return fail("cuLaunchKernel", r);
+    if ((r = d.cuCtxSynchronize())) return fail("kernel execution", r);
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i].kind != KernelArg::Kind::Buffer) continue;
+        res.buffers.emplace_back(args[i].bytes);
+        if ((r = d.cuMemcpyDtoH(res.buffers.back().data(), dev[i], args[i].bytes))) return fail("cuMemcpyDtoH", r);
+    }
+    cleanup();
     res.ok = true;
     return res;
 }

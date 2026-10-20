@@ -77,6 +77,17 @@ KernelAnalysis analyze_function(const Function& original, const Module& module, 
     return out;
 }
 
+std::string emit_spilled_module(const Module& module, const KernelAnalysis& analysis) {
+    if (analysis.spilled_ptx.empty()) return {};
+    Module head;
+    head.version = module.version;
+    head.target = module.target;
+    head.target_options = module.target_options;
+    head.address_size = module.address_size;
+    head.globals = module.globals;
+    return print_module(head) + "\n" + analysis.spilled_ptx;
+}
+
 GroundTruth fetch_ground_truth(backend::CubinProvider& provider, const std::string& ptx_source,
                                const std::string& kernel_name, uint32_t max_regs, const std::string& target_sm) {
     GroundTruth gt;

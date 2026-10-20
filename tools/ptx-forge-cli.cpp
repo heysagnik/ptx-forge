@@ -8,6 +8,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "Pipeline.hpp"
 #include "backend/DriverJITLinker.hpp"
@@ -29,6 +30,7 @@ void usage() {
         "\n"
         "usage:\n"
         "  ptx-forge analyze <kernel.ptx> [options]\n"
+        "  ptx-forge verify <kernel.ptx> --grid=X[,Y,Z] --block=X[,Y,Z] --arg=... [options]\n"
         "  ptx-forge inspect <file.cubin>\n"
         "\n"
         "analyze options:\n"
@@ -41,7 +43,12 @@ void usage() {
         "  --no-spill-rewrite      only predict spills, do not rewrite\n"
         "  --ground-truth=MODE     auto (default) | jit | ptxas | none\n"
         "  --cubin=FILE            compare against a pre-built cubin instead of compiling\n"
-        "  --ptxas=PATH            ptxas executable to use for --ground-truth=ptxas\n";
+        "  --ptxas=PATH            ptxas executable to use for --ground-truth=ptxas\n"
+        "\n"
+        "verify runs the kernel on the GPU: original PTX, the same PTX capped by the driver at K registers,\n"
+        "and ptx-forge's spill-rewritten PTX, then compares every output buffer bit for bit.\n"
+        "  --grid / --block        launch shape (default 1)\n"
+        "  --arg=buf:BYTES|u32:N|u64:N|f32:X   one per kernel parameter, in order (repeatable)\n";
 }
 
 bool read_file(const std::string& path, std::string& out) {
@@ -81,6 +88,8 @@ struct Args {
     uint32_t max_regs = 255;
     std::string kernel, export_cfg, emit_spilled, mode = "auto", cubin, ptxas;
     bool heatmap = false, dce = true, rewrite = true;
+    std::string grid = "1", block = "1";
+    std::vector<std::string> kernel_args;
 };
 
 bool parse_args(int argc, char** argv, Args& a) {
@@ -100,6 +109,9 @@ bool parse_args(int argc, char** argv, Args& a) {
         else if (starts_with(s, "--ground-truth=")) a.mode = val("--ground-truth=");
         else if (starts_with(s, "--cubin=")) a.cubin = val("--cubin=");
         else if (starts_with(s, "--ptxas=")) a.ptxas = val("--ptxas=");
+        else if (starts_with(s, "--grid=")) a.grid = val("--grid=");
+        else if (starts_with(s, "--block=")) a.block = val("--block=");
+        else if (starts_with(s, "--arg=")) a.kernel_args.push_back(val("--arg="));
         else if (s == "--heatmap") a.heatmap = true;
         else if (s == "--no-dce") a.dce = false;
         else if (s == "--no-spill-rewrite") a.rewrite = false;
@@ -304,18 +316,145 @@ int cmd_analyze(const Args& a) {
                 std::cout << "\nNo spill code generated for " << r.name << "; --emit-spilled skipped\n";
             } else {
                 std::string path = dot_path_for(a.emit_spilled, r.name, total > 1);
-                ir::Module out;
-                out.version = module.version;
-                out.target = module.target;
-                out.target_options = module.target_options;
-                out.address_size = module.address_size;
-                out.globals = module.globals;
-                std::ofstream(path) << ir::print_module(out) << "\n" << r.spilled_ptx;
+                std::ofstream(path) << emit_spilled_module(module, r);
                 std::cout << "\nPTX with spill code written to " << path << "\n";
             }
         }
     }
     return 0;
+}
+
+bool parse_dims(const std::string& s, uint32_t out[3]) {
+    out[0] = out[1] = out[2] = 1;
+    std::stringstream ss(s);
+    std::string part;
+    for (int i = 0; i < 3 && std::getline(ss, part, ','); ++i) {
+        long v = std::strtol(part.c_str(), nullptr, 10);
+        if (v < 1) return false;
+        out[i] = static_cast<uint32_t>(v);
+    }
+    return true;
+}
+
+bool parse_kernel_arg(const std::string& s, uint32_t index, backend::KernelArg& out) {
+    size_t colon = s.find(':');
+    if (colon == std::string::npos) return false;
+    std::string kind = s.substr(0, colon), val = s.substr(colon + 1);
+    out = {};
+    out.seed = index;
+    if (kind == "buf") {
+        out.kind = backend::KernelArg::Kind::Buffer;
+        out.bytes = static_cast<size_t>(std::strtoull(val.c_str(), nullptr, 10));
+        return out.bytes > 0;
+    }
+    if (kind == "u32" || kind == "u64") {
+        out.kind = kind == "u32" ? backend::KernelArg::Kind::U32 : backend::KernelArg::Kind::U64;
+        out.value = std::strtoull(val.c_str(), nullptr, 10);
+        return true;
+    }
+    if (kind == "f32") {
+        out.kind = backend::KernelArg::Kind::F32;
+        float f = std::strtof(val.c_str(), nullptr);
+        uint32_t bits;
+        std::memcpy(&bits, &f, 4);
+        out.value = bits;
+        return true;
+    }
+    return false;
+}
+
+int cmd_verify(const Args& a) {
+    if (a.input.empty()) { usage(); return 2; }
+    std::string source;
+    if (!read_file(a.input, source)) { std::cerr << "error: cannot read " << a.input << "\n"; return 1; }
+    ir::Module module;
+    try { module = frontend::parse_ptx(source); }
+    catch (const frontend::ParseError& e) {
+        std::cerr << a.input << ":" << e.line << ":" << e.col << ": error: " << e.what() << "\n";
+        return 1;
+    }
+    const ir::Function* fn = nullptr;
+    for (auto& f : module.functions)
+        if (f.is_entry && (a.kernel.empty() || f.name == a.kernel)) { fn = &f; break; }
+    if (!fn) { std::cerr << "error: no matching .entry kernel found\n"; return 1; }
+    if (a.kernel_args.size() != fn->params.size()) {
+        std::cerr << "error: " << fn->name << " takes " << fn->params.size() << " parameters, got "
+                  << a.kernel_args.size() << " --arg values\n";
+        return 2;
+    }
+    std::vector<backend::KernelArg> args(a.kernel_args.size());
+    for (size_t i = 0; i < args.size(); ++i)
+        if (!parse_kernel_arg(a.kernel_args[i], static_cast<uint32_t>(i), args[i])) {
+            std::cerr << "error: bad --arg '" << a.kernel_args[i] << "' (use buf:BYTES, u32:N, u64:N or f32:X)\n";
+            return 2;
+        }
+    backend::LaunchConfig cfg;
+    if (!parse_dims(a.grid, cfg.grid) || !parse_dims(a.block, cfg.block)) {
+        std::cerr << "error: --grid / --block expect X[,Y[,Z]] with positive values\n";
+        return 2;
+    }
+
+    AnalysisOptions opts;
+    opts.max_regs = a.max_regs;
+    opts.dce = a.dce;
+    KernelAnalysis r = analyze_function(*fn, module, opts);
+
+    backend::DriverJITLinker gpu;
+    if (!gpu.available()) { std::cerr << "error: " << gpu.unavailable_reason() << "\n"; return 1; }
+
+    struct Variant { std::string name; std::string ptx; uint32_t cap; backend::RunResult run; };
+    std::vector<Variant> variants;
+    variants.push_back({"original, driver default", source, 0, {}});
+    if (a.max_regs < 255)
+        variants.push_back({"original, driver cap " + std::to_string(a.max_regs), source, a.max_regs, {}});
+    if (!r.spilled_ptx.empty()) {
+        std::string spilled = emit_spilled_module(module, r);
+        variants.push_back({"ptx-forge spill code, no cap", spilled, 0, {}});
+        variants.push_back({"ptx-forge spill code, cap " + std::to_string(a.max_regs), spilled, a.max_regs, {}});
+    }
+    for (auto& v : variants) v.run = gpu.run(v.ptx, fn->name, args, cfg, v.cap);
+
+    std::cout << kRule << "\n PTX-FORGE: GPU verification on " << gpu.device_name() << " (" << gpu.device_arch()
+              << ")\n" << kRule << "\n";
+    std::printf("Kernel        : %s   grid=%s block=%s\n", fn->name.c_str(), a.grid.c_str(), a.block.c_str());
+    std::printf("Prediction    : peak %u live registers, K=%u -> %s (%u B .local predicted)\n\n", r.peak_slots,
+                a.max_regs, r.alloc.fits_without_spill ? "fits" : "spills", r.alloc.frame_bytes);
+    if (r.spilled_ptx.empty() && a.max_regs < 255)
+        std::cout << "(allocator predicts no spill at K=" << a.max_regs << ", so there is no rewritten PTX to run)\n\n";
+
+    const backend::RunResult& base = variants[0].run;
+    std::printf("  %-34s %5s %9s  %s\n", "variant", "regs", "local B", "output vs baseline");
+    bool all_ok = base.ok;
+    for (size_t i = 0; i < variants.size(); ++i) {
+        const auto& v = variants[i];
+        std::string verdict;
+        if (!v.run.ok) {
+            size_t nl = v.run.error.find('\n');
+            std::string detail = nl == std::string::npos ? v.run.error : v.run.error.substr(nl + 1);
+            detail = detail.substr(0, detail.find('\n'));
+            verdict = "FAILED: " + (detail.empty() ? v.run.error.substr(0, nl) : detail);
+            all_ok = false;
+        } else if (i == 0) {
+            verdict = "reference";
+        } else if (!base.ok) {
+            verdict = "no baseline";
+        } else {
+            verdict = "identical";
+            for (size_t b = 0; b < base.buffers.size() && verdict == "identical"; ++b) {
+                const auto& x = base.buffers[b];
+                const auto& y = v.run.buffers[b];
+                for (size_t k = 0; k < x.size(); ++k)
+                    if (x[k] != y[k]) {
+                        verdict = "MISMATCH (buffer " + std::to_string(b) + ", byte " + std::to_string(k) + ")";
+                        all_ok = false;
+                        break;
+                    }
+            }
+        }
+        std::printf("  %-34s %5d %9d  %s\n", v.name.c_str(), v.run.registers, v.run.local_bytes, verdict.c_str());
+    }
+    std::cout << kRule << "\n";
+    return all_ok ? 0 : 1;
 }
 
 }  // namespace
@@ -325,6 +464,7 @@ int main(int argc, char** argv) {
     if (!parse_args(argc, argv, a)) { usage(); return 2; }
     if (a.command == "analyze") return cmd_analyze(a);
     if (a.command == "inspect") return cmd_inspect(a);
+    if (a.command == "verify") return cmd_verify(a);
     usage();
     return 2;
 }
